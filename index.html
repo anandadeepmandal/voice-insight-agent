@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Voice Insight AI Agent</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <main class="page">
+    <section class="hero">
+      <div class="hero-card">
+        <div class="badge">Speech to Text · Theme Analysis · Sentiment Scoring</div>
+        <h1>Voice Insight AI Agent</h1>
+        <p class="developer">developed by a.mandal@bham.ac.uk</p>
+        <p class="intro">
+          Record speech from your laptop microphone or upload an audio file. The agent will transcribe the audio, identify the dominant theme, extract key themes, summarise the text, and calculate a sentiment score.
+        </p>
+      </div>
+    </section>
+
+    <section class="workspace">
+      <div class="panel">
+        <h2>1. Record from microphone</h2>
+        <p class="hint">Click start, speak clearly, then stop and analyse the recording.</p>
+
+        <div class="record-box">
+          <button id="startBtn" class="primary">Start recording</button>
+          <button id="stopBtn" class="secondary" disabled>Stop recording</button>
+          <span id="recordingStatus" class="status">Not recording</span>
+        </div>
+
+        <audio id="audioPreview" controls class="audio-preview hidden"></audio>
+
+        <div class="divider"><span>or</span></div>
+
+        <h2>2. Upload an audio file</h2>
+        <p class="hint">Supported file types: mp3, mp4, mpeg, mpga, m4a, wav, webm. Maximum file size: 25 MB.</p>
+
+        <label class="upload-box">
+          <input id="audioFile" type="file" accept=".mp3,.mp4,.mpeg,.mpga,.m4a,.wav,.webm,audio/*">
+          <span>Choose an audio file</span>
+        </label>
+
+        <div id="fileName" class="file-name">No file selected</div>
+
+        <button id="analyseBtn" class="analyse">Analyse audio</button>
+        <button id="clearBtn" class="ghost">Clear</button>
+
+        <div id="loading" class="loading hidden">
+          <div class="spinner"></div>
+          <span>Transcribing and analysing...</span>
+        </div>
+
+        <div id="errorBox" class="error hidden"></div>
+      </div>
+
+      <div class="panel results-panel">
+        <h2>Results</h2>
+
+        <div id="emptyState" class="empty">
+          Your transcript and analysis will appear here.
+        </div>
+
+        <div id="results" class="hidden">
+          <div class="metrics">
+            <div class="metric">
+              <span class="metric-label">Sentiment score</span>
+              <strong id="sentimentScore">0.000</strong>
+              <small>Range: -1 negative to +1 positive</small>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Sentiment label</span>
+              <strong id="sentimentLabel">Neutral</strong>
+              <small id="sentimentBreakdown">Positive 0 · Neutral 0 · Negative 0</small>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Dominant theme</span>
+              <strong id="dominantTheme">Theme</strong>
+              <small id="wordCount">0 words</small>
+            </div>
+          </div>
+
+          <div class="result-section">
+            <h3>Summary</h3>
+            <p id="summary"></p>
+          </div>
+
+          <div class="result-section">
+            <h3>Key themes</h3>
+            <div id="themes" class="chips"></div>
+          </div>
+
+          <div class="result-section">
+            <div class="row-title">
+              <h3>Transcript</h3>
+              <button id="copyTranscriptBtn" class="mini">Copy transcript</button>
+            </div>
+            <textarea id="transcript" readonly></textarea>
+          </div>
+
+          <div class="download-row">
+            <button id="downloadTxtBtn" class="secondary">Download transcript</button>
+            <button id="downloadJsonBtn" class="secondary">Download analysis JSON</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    let mediaRecorder;
+    let recordedChunks = [];
+    let recordedBlob = null;
+    let selectedFile = null;
+    let latestResult = null;
+
+    const startBtn = document.getElementById("startBtn");
+    const stopBtn = document.getElementById("stopBtn");
+    const analyseBtn = document.getElementById("analyseBtn");
+    const clearBtn = document.getElementById("clearBtn");
+    const audioFile = document.getElementById("audioFile");
+    const fileName = document.getElementById("fileName");
+    const statusEl = document.getElementById("recordingStatus");
+    const audioPreview = document.getElementById("audioPreview");
+    const loading = document.getElementById("loading");
+    const errorBox = document.getElementById("errorBox");
+    const results = document.getElementById("results");
+    const emptyState = document.getElementById("emptyState");
+
+    function showError(message) {
+      errorBox.textContent = message;
+      errorBox.classList.remove("hidden");
+    }
+
+    function clearError() {
+      errorBox.textContent = "";
+      errorBox.classList.add("hidden");
+    }
+
+    function setLoading(isLoading) {
+      loading.classList.toggle("hidden", !isLoading);
+      analyseBtn.disabled = isLoading;
+      startBtn.disabled = isLoading;
+      stopBtn.disabled = isLoading || !mediaRecorder || mediaRecorder.state !== "recording";
+    }
+
+    function blobToFile(blob, filename) {
+      return new File([blob], filename, { type: blob.type || "audio/webm" });
+    }
+
+    startBtn.addEventListener("click", async () => {
+      clearError();
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        recordedChunks = [];
+        recordedBlob = null;
+        selectedFile = null;
+        audioFile.value = "";
+        fileName.textContent = "Recording from microphone";
+
+        const mimeType = MediaRecorder.isTypeSupported("audio/webm")
+          ? "audio/webm"
+          : "";
+
+        mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+
+        mediaRecorder.ondataavailable = (event) => {
+          if (event.data.size > 0) recordedChunks.push(event.data);
+        };
+
+        mediaRecorder.onstop = () => {
+          recordedBlob = new Blob(recordedChunks, { type: "audio/webm" });
+          audioPreview.src = URL.createObjectURL(recordedBlob);
+          audioPreview.classList.remove("hidden");
+          statusEl.textContent = "Recording ready for analysis";
+          stream.getTracks().forEach(track => track.stop());
+        };
+
+        mediaRecorder.start();
+        statusEl.textContent = "Recording...";
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+      } catch (error) {
+        showError("Microphone access failed. Please allow microphone permission in your browser and try again.");
+      }
+    });
+
+    stopBtn.addEventListener("click", () => {
+      if (mediaRecorder && mediaRecorder.state === "recording") {
+        mediaRecorder.stop();
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+      }
+    });
+
+    audioFile.addEventListener("change", () => {
+      clearError();
+      selectedFile = audioFile.files[0] || null;
+      recordedBlob = null;
+
+      if (selectedFile) {
+        fileName.textContent = selectedFile.name;
+        audioPreview.src = URL.createObjectURL(selectedFile);
+        audioPreview.classList.remove("hidden");
+        statusEl.textContent = "Uploaded file ready for analysis";
+      } else {
+        fileName.textContent = "No file selected";
+      }
+    });
+
+    analyseBtn.addEventListener("click", async () => {
+      clearError();
+
+      let fileToSend = selectedFile;
+      if (!fileToSend && recordedBlob) {
+        fileToSend = blobToFile(recordedBlob, "microphone-recording.webm");
+      }
+
+      if (!fileToSend) {
+        showError("Please record audio or upload an audio file first.");
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append("audio", fileToSend);
+
+      setLoading(true);
+
+      try {
+        const response = await fetch("/analyse", {
+          method: "POST",
+          body: formData
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.error || "Analysis failed.");
+        }
+
+        latestResult = data;
+        renderResults(data);
+      } catch (error) {
+        showError(error.message);
+      } finally {
+        setLoading(false);
+      }
+    });
+
+    clearBtn.addEventListener("click", () => {
+      clearError();
+      selectedFile = null;
+      recordedBlob = null;
+      latestResult = null;
+      audioFile.value = "";
+      fileName.textContent = "No file selected";
+      statusEl.textContent = "Not recording";
+      audioPreview.src = "";
+      audioPreview.classList.add("hidden");
+      results.classList.add("hidden");
+      emptyState.classList.remove("hidden");
+    });
+
+    function renderResults(data) {
+      const analysis = data.analysis;
+
+      document.getElementById("sentimentScore").textContent = analysis.sentiment_score.toFixed(3);
+      document.getElementById("sentimentLabel").textContent = analysis.sentiment_label;
+      document.getElementById("dominantTheme").textContent = analysis.dominant_theme;
+      document.getElementById("summary").textContent = analysis.summary;
+      document.getElementById("transcript").value = data.transcript;
+      document.getElementById("wordCount").textContent =
+        `${analysis.word_count} words · about ${analysis.estimated_reading_time_minutes} minute read`;
+
+      document.getElementById("sentimentBreakdown").textContent =
+        `Positive ${analysis.sentiment_breakdown.positive} · Neutral ${analysis.sentiment_breakdown.neutral} · Negative ${analysis.sentiment_breakdown.negative}`;
+
+      const themes = document.getElementById("themes");
+      themes.innerHTML = "";
+      analysis.themes.forEach(theme => {
+        const chip = document.createElement("span");
+        chip.className = "chip";
+        chip.textContent = theme;
+        themes.appendChild(chip);
+      });
+
+      emptyState.classList.add("hidden");
+      results.classList.remove("hidden");
+    }
+
+    document.getElementById("copyTranscriptBtn").addEventListener("click", async () => {
+      const transcript = document.getElementById("transcript").value;
+      await navigator.clipboard.writeText(transcript);
+      document.getElementById("copyTranscriptBtn").textContent = "Copied";
+      setTimeout(() => {
+        document.getElementById("copyTranscriptBtn").textContent = "Copy transcript";
+      }, 1500);
+    });
+
+    function downloadFile(filename, content, mimeType) {
+      const blob = new Blob([content], { type: mimeType });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    document.getElementById("downloadTxtBtn").addEventListener("click", () => {
+      if (!latestResult) return;
+      downloadFile("transcript.txt", latestResult.transcript, "text/plain");
+    });
+
+    document.getElementById("downloadJsonBtn").addEventListener("click", () => {
+      if (!latestResult) return;
+      downloadFile("analysis.json", JSON.stringify(latestResult, null, 2), "application/json");
+    });
+  </script>
+</body>
+</html>
