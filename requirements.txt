@@ -1,0 +1,5 @@
+Flask>=3.0,<4
+gunicorn>=22.0,<24
+openai>=1.99.9
+vaderSentiment>=3.3,<4
+Werkzeug>=3.0,<4

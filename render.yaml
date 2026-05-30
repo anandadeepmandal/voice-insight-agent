@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: voice-insight-ai-agent
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: TRANSCRIPTION_MODEL
+        value: gpt-4o-mini-transcribe
